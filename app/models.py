@@ -1,63 +1,78 @@
-"""Data models used to validate API input and output."""
+"""Pydantic models for inventory API requests and responses."""
 
-from pydantic import BaseModel, Field
+from typing import Literal
 
-
-class StudentInput(BaseModel):
-    """Fields students can send when creating or updating a record."""
-
-    name: str = Field(min_length=1)
-    age: int = Field(ge=0)
-
-    @staticmethod
-    def list_students(database_connection):
-        with database_connection() as connection:
-            rows = connection.execute(
-                "SELECT id, name, age FROM students ORDER BY id"
-            ).fetchall()
-        return [rows]
-
-    @staticmethod
-    def create_student(student_input, database_connection):
-        with database_connection() as connection:
-            cursor = connection.execute(
-                "INSERT INTO students (name, age) VALUES (?, ?)",
-                (student_input.name, student_input.age),
-            )
-            row = connection.execute(
-                "SELECT id, name, age FROM students WHERE id = ?", (cursor.lastrowid,)
-            ).fetchone()
-        return row
-
-    @staticmethod
-    def get_student(student_id, database_connection):
-        with database_connection() as connection:
-            row = connection.execute(
-                "SELECT id, name, age FROM students WHERE id = ?", (student_id,)
-            ).fetchone()
-        return row
-
-    @staticmethod
-    def update_student(student_id, student_input, database_connection):
-        with database_connection() as connection:
-            cursor = connection.execute(
-                "UPDATE students SET name = ?, age = ? WHERE id = ?",
-                (student_input.name, student_input.age, student_id),
-            )
-            row = connection.execute(
-                "SELECT id, name, age FROM students WHERE id = ?", (student_id,)
-            ).fetchone()
-        return row
-
-    @staticmethod
-    def delete_student(student_id, database_connection):
-        with database_connection() as connection:
-            cursor = connection.execute(
-                "DELETE FROM students WHERE id = ?", (student_id,)
-            )
+from pydantic import BaseModel, Field, field_validator
 
 
-class Student(StudentInput):
-    """A student record returned by the API."""
+class CategoryInput(BaseModel):
+    """Fields accepted when creating or updating a product category."""
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Name must not be blank.")
+        return value
+
+
+class Category(CategoryInput):
+    """A stored product category."""
 
     id: int
+
+
+class ProductInput(BaseModel):
+    """Fields accepted when updating product details."""
+
+    name: str = Field(min_length=1, max_length=150)
+    sku: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    category_id: int = Field(gt=0)
+    reorder_level: int = Field(default=0, ge=0)
+
+    @field_validator("name", "sku")
+    @classmethod
+    def text_fields_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("This field must not be blank.")
+        return value
+
+
+class ProductCreate(ProductInput):
+    """Fields accepted when creating a product, including its starting stock."""
+
+    initial_quantity: int = Field(default=0, ge=0)
+
+
+class Product(ProductInput):
+    """A stored product and its current stock level."""
+
+    id: int
+    quantity: int
+    created_at: str
+    updated_at: str
+
+
+class StockMovementInput(BaseModel):
+    """A request to receive new stock or issue stock from inventory."""
+
+    movement_type: Literal["receive", "issue"]
+    quantity: int = Field(gt=0)
+    note: str = Field(default="", max_length=500)
+
+
+class StockMovement(BaseModel):
+    """An immutable record of a stock transaction."""
+
+    id: int
+    product_id: int
+    movement_type: Literal["receive", "issue"]
+    quantity: int
+    note: str
+    created_at: str
